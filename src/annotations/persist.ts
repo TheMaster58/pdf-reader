@@ -15,13 +15,21 @@ export function setBaseline(bytes: Uint8Array | null): void {
   baseline = bytes;
 }
 
+/** The bytes the open document was loaded from, or null when it can't be rewritten (read-only). */
+export function getBaseline(): Uint8Array | null {
+  return baseline;
+}
+
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** Shows a short confirmation ("Saved") that fades by itself. */
-export function showNotice(message: string): void {
+/**
+ * Shows a short message that fades by itself: a confirmation ("Saved", green) or, with the "info"
+ * tone, a neutral hint that stays a little longer.
+ */
+export function showNotice(message: string, tone: 'ok' | 'info' = 'ok'): void {
   clearTimeout(noticeTimer);
-  useApp.setState({ notice: message });
-  noticeTimer = setTimeout(() => useApp.setState({ notice: null }), 2500);
+  useApp.setState({ notice: message, noticeTone: tone });
+  noticeTimer = setTimeout(() => useApp.setState({ notice: null }), tone === 'info' ? 4500 : 2500);
 }
 
 /**
@@ -41,13 +49,33 @@ async function verifyGenerated(bytes: Uint8Array, expectedPages: number, annotat
       const count = (subtype: string) => found.filter((f) => f.subtype === subtype).length;
       const wantHighlights = annotations.filter((a) => a.pageIndex === pageIndex && a.kind === 'highlight').length;
       const wantNotes = annotations.filter((a) => a.pageIndex === pageIndex && a.kind === 'note').length;
-      if (count('Highlight') < wantHighlights || count('Text') < wantNotes) {
+      const wantBoxes = annotations.filter((a) => a.pageIndex === pageIndex && a.kind === 'textbox').length;
+      const wantSignatures = annotations.filter((a) => a.pageIndex === pageIndex && a.kind === 'signature').length;
+      if (count('Highlight') < wantHighlights || count('Text') < wantNotes || count('FreeText') < wantBoxes ||
+        count('Stamp') < wantSignatures
+      ) {
         throw new Error(`annotations on page ${pageIndex + 1} were not written correctly`);
       }
     }
   } finally {
     void doc.loadingTask.destroy();
   }
+}
+
+/** Asks whether to save a copy, save over the signed file anyway, or cancel. */
+function askAboutSignedFile(fileName: string): Promise<'copy' | 'overwrite' | 'cancel'> {
+  if (useApp.getState().signedPrompt) return Promise.resolve('cancel'); // already asking
+  return new Promise((resolve) => {
+    useApp.setState({
+      signedPrompt: {
+        fileName,
+        resolve: (choice) => {
+          useApp.setState({ signedPrompt: null });
+          resolve(choice);
+        },
+      },
+    });
+  });
 }
 
 /**
@@ -59,6 +87,14 @@ export async function saveCurrent(opts: { saveAs?: boolean } = {}): Promise<bool
   const store = useAnnotations.getState();
   if (!baseline || app.status !== 'ready' || !app.filePath || app.annotationBlock || app.saving) return false;
   if (!opts.saveAs && !store.dirty) return true;
+
+  // Saving in place rewrites the whole file, which would make an existing digital signature invalid.
+  if (!opts.saveAs && app.documentSigned && !app.signedAcknowledged) {
+    const choice = await askAboutSignedFile(app.fileName ?? 'This document');
+    if (choice === 'cancel') return false;
+    if (choice === 'copy') return saveCurrent({ saveAs: true });
+    useApp.setState({ signedAcknowledged: true });
+  }
 
   let target = app.filePath;
   if (opts.saveAs) {

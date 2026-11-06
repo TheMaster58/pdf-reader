@@ -4,9 +4,17 @@ import { getController } from '../viewer/actions';
 import { ColorSwatches } from './ColorSwatches';
 import { pdfPointToFraction, pdfToFraction, type Rect } from './geometry';
 import { hasNote } from './list';
-import { NOTE_ICON_PX, NOTE_MARKER, type Annotation } from './model';
+import {
+  NOTE_ICON_PX,
+  NOTE_MARKER,
+  type Annotation,
+  type HighlightAnnotation,
+  type NoteAnnotation,
+} from './model';
 import { usePageHosts, type PageHost } from './pageHosts';
 import { useAnnotations } from './store';
+import { SignatureView } from './SignatureView';
+import { TextBoxView, TextFormatBar } from './TextBox';
 
 const pct = (v: number) => `${(v * 100).toFixed(4)}%`;
 
@@ -44,7 +52,15 @@ interface Anchor {
 }
 
 /** Editor for the selected annotation: colour, comment, delete. Sits inside the page. */
-function AnnotationPopover({ ann, anchor, host }: { ann: Annotation; anchor: Anchor; host: PageHost }) {
+function AnnotationPopover({
+  ann,
+  anchor,
+  host,
+}: {
+  ann: HighlightAnnotation | NoteAnnotation;
+  anchor: Anchor;
+  host: PageHost;
+}) {
   const update = useAnnotations((s) => s.updateAnnotation);
   const remove = useAnnotations((s) => s.removeAnnotations);
   const select = useAnnotations((s) => s.select);
@@ -132,24 +148,25 @@ function AnnotationPopover({ ann, anchor, host }: { ann: Annotation; anchor: Anc
 function PageOverlay({ host, annotations }: { host: PageHost; annotations: Annotation[] }) {
   const selectedId = useAnnotations((s) => s.selectedId);
 
+  // Where each annotation sits on the page, as fractions of it. Only the field for its kind is set.
   const placed = useMemo(
     () =>
-      annotations.map((ann) =>
-        ann.kind === 'highlight'
-          ? { ann, rects: ann.rects.map((r) => pdfToFraction(host.viewport, r)) }
-          : { ann, rects: [] as Rect[], point: pdfPointToFraction(host.viewport, ann.point) },
-      ),
+      annotations.map((ann) => ({
+        ann,
+        rects: ann.kind === 'highlight' ? ann.rects.map((r) => pdfToFraction(host.viewport, r)) : ([] as Rect[]),
+        point: ann.kind === 'note' ? pdfPointToFraction(host.viewport, ann.point) : null,
+      })),
     [annotations, host.viewport],
   );
   const selected = placed.find((p) => p.ann.id === selectedId);
 
   let anchor: Anchor | null = null;
   if (selected) {
-    if (selected.ann.kind === 'highlight') {
+    if (selected.ann.kind === 'highlight' && selected.rects.length) {
       const lowest = selected.rects.reduce((a, b) => (b.bottom > a.bottom ? b : a));
       const highest = selected.rects.reduce((a, b) => (b.top < a.top ? b : a));
       anchor = { left: lowest.left, belowAt: lowest.bottom, belowPx: GAP, aboveAt: highest.top };
-    } else if ('point' in selected && selected.point) {
+    } else if (selected.point) {
       anchor = {
         left: selected.point.x,
         belowAt: selected.point.y,
@@ -158,6 +175,7 @@ function PageOverlay({ host, annotations }: { host: PageHost; annotations: Annot
       };
     }
   }
+  const selectedBox = selected?.ann.kind === 'textbox' ? selected.ann : null;
 
   return (
     <>
@@ -180,7 +198,9 @@ function PageOverlay({ host, annotations }: { host: PageHost; annotations: Annot
         <>
           {placed.map((p) => {
             const { ann } = p;
-            if (ann.kind === 'note' && 'point' in p && p.point) {
+            if (ann.kind === 'textbox') return <TextBoxView key={ann.id} ann={ann} host={host} />;
+            if (ann.kind === 'signature') return <SignatureView key={ann.id} ann={ann} host={host} />;
+            if (ann.kind === 'note' && p.point) {
               return (
                 <div
                   key={ann.id}
@@ -212,7 +232,10 @@ function PageOverlay({ host, annotations }: { host: PageHost; annotations: Annot
             }
             return null;
           })}
-          {selected && anchor && <AnnotationPopover ann={selected.ann} anchor={anchor} host={host} />}
+          {selected && anchor && (selected.ann.kind === 'highlight' || selected.ann.kind === 'note') && (
+            <AnnotationPopover ann={selected.ann} anchor={anchor} host={host} />
+          )}
+          {selectedBox && <TextFormatBar ann={selectedBox} host={host} />}
         </>,
         host.el,
       )}

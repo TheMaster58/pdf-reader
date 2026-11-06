@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { saveAuthor } from '../services/files';
+import { useSignatures } from '../signature/signatureStore';
 import { useApp } from './store';
 
 /**
@@ -10,6 +11,8 @@ import { useApp } from './store';
  */
 function SettingsForm({ initialAuthor }: { initialAuthor: string }) {
   const [draft, setDraft] = useState(initialAuthor);
+  const savedCount = useSignatures((s) => s.saved.length);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -48,6 +51,35 @@ function SettingsForm({ initialAuthor }: { initialAuthor: string }) {
           />
         </label>
         <p>Shown as the author of highlights and notes you add from now on. Existing ones keep their author.</p>
+        <div className="field">
+          <span>Saved signatures</span>
+          {savedCount === 0 ? (
+            <p>None are saved on this computer.</p>
+          ) : confirmingRemoval ? (
+            <div className="remove-confirm">
+              <p>
+                Remove {savedCount} saved {savedCount === 1 ? 'signature' : 'signatures'} from this computer?
+              </p>
+              <button type="button" onClick={() => setConfirmingRemoval(false)}>
+                Keep them
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  useSignatures.getState().clearAll();
+                  setConfirmingRemoval(false);
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="danger" onClick={() => setConfirmingRemoval(true)}>
+              Remove all saved signatures...
+            </button>
+          )}
+        </div>
         <div className="modal-actions">
           <button
             type="button"

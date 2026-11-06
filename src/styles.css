@@ -410,6 +410,8 @@ input[type='password'] {
   inset: 0;
   z-index: 5;
   pointer-events: none;
+  /* Lets text boxes size themselves in container units, so points stay exact at every zoom. */
+  container-type: inline-size;
 }
 
 /*
@@ -741,4 +743,647 @@ kbd {
   background: transparent;
   border-color: transparent;
   text-decoration: underline;
+}
+
+/* ---- printing ---- */
+
+.print-dialog {
+  width: 400px;
+}
+
+.print-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.print-pages legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.print-pages label,
+.print-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.print-range {
+  flex: 1;
+  min-width: 0;
+}
+
+.print-error,
+.print-warning {
+  margin: 0;
+  font-size: 12px;
+}
+
+.print-error {
+  color: var(--accent);
+}
+
+.print-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.print-progress progress {
+  width: 100%;
+}
+
+/*
+ * The print area holds one image per page and is never visible on screen. When printing, everything
+ * else in the window is hidden and each page image fills one sheet; portrait and landscape pages
+ * use named page boxes so a mixed document prints with the right orientation for each page.
+ */
+#print-root {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  @page pr-portrait {
+    size: portrait;
+    margin: 0;
+  }
+
+  @page pr-landscape {
+    size: landscape;
+    margin: 0;
+  }
+
+  /*
+   * Sizes are percentages, never vw/vh: Chromium resolves those once from the first page's size, so
+   * on a landscape page in a portrait document the box would be taller than the sheet and spill onto
+   * an extra blank-looking page. Percentages follow each page's own box.
+   */
+  html,
+  body,
+  #print-root {
+    height: 100%;
+    overflow: visible;
+  }
+
+  html,
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  body > :not(#print-root) {
+    display: none !important;
+  }
+
+  #print-root {
+    display: block;
+  }
+
+  .pr-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    break-after: page;
+  }
+
+  .pr-page:last-child {
+    break-after: auto;
+  }
+
+  .pr-page.portrait {
+    page: pr-portrait;
+  }
+
+  .pr-page.landscape {
+    page: pr-landscape;
+  }
+
+  .pr-page img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
+/* ---- page layout (View menu, page buttons) ---- */
+
+.menu-list.view-menu {
+  min-width: 260px;
+}
+
+.menu-list.view-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-mark {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+.page-nav button {
+  padding: 2px 8px;
+  line-height: 1.2;
+}
+
+/*
+ * One page (or pair) at a time: PDF.js sizes "Fit page" without the 9px border it draws above and
+ * below each page, so with them a fitted page is ~15px too tall for the window and gets a scrollbar.
+ * Drop the vertical border and margin in these layouts (the side borders and shadow stay).
+ */
+.pdf-container.paged-layout .pdfViewer .page {
+  margin-top: 0;
+  margin-bottom: 0;
+  border-top-width: 0;
+  border-bottom-width: 0;
+}
+
+/* ---- text boxes ---- */
+
+/* The frame takes the mouse itself (the interactive layer around it does not). */
+.text-box {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.text-box:hover {
+  outline: 1px dashed rgb(26 115 232 / 0.55);
+  outline-offset: 1px;
+}
+
+.text-box.selected {
+  outline: 1.5px dashed #1a73e8;
+  outline-offset: 1px;
+  cursor: move;
+}
+
+.text-box.editing {
+  outline-style: solid;
+  cursor: text;
+}
+
+/* Carries the font, background and padding, and clips text that does not fit, like the saved file. */
+.text-box-body {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  text-rendering: geometricPrecision;
+}
+
+.text-box-lines {
+  white-space: pre;
+  user-select: none;
+}
+
+.text-box-editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: inherit;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  line-height: inherit;
+  text-align: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.text-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1.5px solid #1a73e8;
+  border-radius: 2px;
+}
+
+.text-handle.h-nw {
+  left: -5px;
+  top: -5px;
+  cursor: nwse-resize;
+}
+.text-handle.h-n {
+  left: calc(50% - 4.5px);
+  top: -5px;
+  cursor: ns-resize;
+}
+.text-handle.h-ne {
+  right: -5px;
+  top: -5px;
+  cursor: nesw-resize;
+}
+.text-handle.h-e {
+  right: -5px;
+  top: calc(50% - 4.5px);
+  cursor: ew-resize;
+}
+.text-handle.h-se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
+.text-handle.h-s {
+  left: calc(50% - 4.5px);
+  bottom: -5px;
+  cursor: ns-resize;
+}
+.text-handle.h-sw {
+  left: -5px;
+  bottom: -5px;
+  cursor: nesw-resize;
+}
+.text-handle.h-w {
+  left: -5px;
+  top: calc(50% - 4.5px);
+  cursor: ew-resize;
+}
+
+.hl-popover.text-format-bar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: 520px;
+}
+
+.text-format-bar select {
+  max-width: 110px;
+}
+
+.size-field,
+.align-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.size-field input {
+  width: 3.2em;
+  text-align: center;
+}
+
+.size-field button,
+.align-group button {
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+.swatch-none {
+  background:
+    linear-gradient(
+      to top right,
+      transparent calc(50% - 1px),
+      #d32f2f 50%,
+      transparent calc(50% + 1px)
+    ),
+    #fff;
+}
+
+.text-format-warning {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.chip-text {
+  flex: none;
+  width: 16px;
+  font:
+    700 15px/1 Georgia,
+    serif;
+  text-align: center;
+}
+
+/* ---- signatures ---- */
+
+.sig-box {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.sig-box:hover {
+  outline: 1px dashed rgb(26 115 232 / 0.55);
+  outline-offset: 1px;
+}
+
+.sig-box.selected {
+  outline: 1.5px dashed #1a73e8;
+  outline-offset: 1px;
+  cursor: move;
+}
+
+.sig-toolbar {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
+  cursor: default;
+}
+
+.sig-toolbar.below {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
+/* Empty signature fields in the document, outlined while a signature is being placed. */
+.sig-field-hint {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #1a73e8;
+  background: rgb(26 115 232 / 0.08);
+  pointer-events: none;
+}
+
+.sig-field-hint span {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font:
+    11px/1 'Segoe UI',
+    system-ui,
+    sans-serif;
+  color: #1a73e8;
+}
+
+/* The copy of the signature that follows the pointer, and the field it is about to fill. */
+.sig-preview,
+.sig-preview-field {
+  position: fixed;
+  z-index: 45;
+  pointer-events: none;
+}
+
+.sig-preview {
+  opacity: 0.6;
+}
+
+.sig-preview-field {
+  box-sizing: border-box;
+  border: 2px solid #1a73e8;
+  background: rgb(26 115 232 / 0.18);
+}
+
+/* ---- signature dialog and menu ---- */
+
+.signature-dialog {
+  width: 540px;
+  max-width: calc(100vw - 24px);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+}
+
+.tab.current {
+  background: var(--bg);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 230px;
+}
+
+.draw-pad {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  height: auto;
+  aspect-ratio: 480 / 170;
+  align-self: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: crosshair;
+  /* Drawing with a finger or pen must not scroll or zoom the page. */
+  touch-action: none;
+}
+
+.draw-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.draw-controls .spacer {
+  flex: 1;
+}
+
+.field.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.image-tab,
+.type-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.picture-preview {
+  display: grid;
+  place-content: center;
+  min-height: 130px;
+  padding: 8px;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  /* A chequerboard shows which parts are see-through. */
+  background: conic-gradient(#e6e6e6 25%, #fff 0 50%, #e6e6e6 0 75%, #fff 0) 0 0 / 16px 16px;
+}
+
+.type-fonts {
+  display: grid;
+  gap: 6px;
+}
+
+.type-font {
+  padding: 8px 12px;
+  font-size: 30px;
+  line-height: 1.2;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--border);
+}
+
+.type-font.current {
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 1px #1a73e8;
+}
+
+.signature-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sign-menu {
+  display: inline-flex;
+}
+
+.sign-menu .split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.sign-menu .split-arrow {
+  padding: 4px 6px;
+  border-left: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.sign-list {
+  min-width: 260px;
+}
+
+.menu-heading {
+  padding: 6px 8px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.saved-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.saved-pick {
+  flex: 1;
+}
+
+.saved-art {
+  display: block;
+  width: 160px;
+  height: 44px;
+  padding: 2px 4px;
+  background: #fff;
+  border-radius: 4px;
+}
+
+.saved-remove {
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.remove-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.remove-confirm p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.style-bold {
+  font-weight: 700;
+}
+
+.style-italic {
+  font-style: italic;
+  font-family: Georgia, serif;
+}
+
+/* ---- editing existing text ---- */
+
+/* Text cursor, and no selecting the page's own text, while Edit text is on. */
+.pdf-container.edit-tool,
+.pdf-container.edit-tool * {
+  cursor: text !important;
+  user-select: none !important;
+}
+
+.edit-run-hint {
+  position: fixed;
+  z-index: 44;
+  box-sizing: border-box;
+  pointer-events: none;
+  border: 1.5px solid #1a73e8;
+  border-radius: 2px;
+  background: rgb(26 115 232 / 0.1);
+}
+
+.toast.info {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.text-format-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
 }

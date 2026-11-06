@@ -2,7 +2,15 @@ import { useEffect, useState } from 'react';
 import { getController } from '../viewer/actions';
 import { useApp } from '../viewer/store';
 import { ColorSwatches } from './ColorSwatches';
-import { captureSelection, highlightSelection, hitTestAnnotation, placeNoteAt } from './interaction';
+import {
+  captureSelection,
+  highlightSelection,
+  hitTestAnnotation,
+  placeNoteAt,
+  placeSignatureAt,
+  placeTextBoxAt,
+} from './interaction';
+import { startReplacementAt } from './replaceText';
 import { useAnnotations } from './store';
 
 interface Anchor {
@@ -31,11 +39,13 @@ export function SelectionToolbar() {
   const activeColor = useAnnotations((s) => s.activeColor);
   const tool = useAnnotations((s) => s.tool);
 
-  // Crosshair cursor (and no text selection) while placing a note.
+  // Crosshair cursor (and no text selection) while placing a note or drawing a text box.
   useEffect(() => {
     const c = getController()?.getContainer();
-    c?.classList.toggle('note-tool', tool === 'note');
-    return () => c?.classList.remove('note-tool');
+    c?.classList.toggle('note-tool', tool === 'note' || tool === 'text');
+    // Editing text: a text cursor, and no selecting of the page text underneath.
+    c?.classList.toggle('edit-tool', tool === 'edit');
+    return () => c?.classList.remove('note-tool', 'edit-tool');
   }, [tool]);
 
   useEffect(() => {
@@ -68,8 +78,10 @@ export function SelectionToolbar() {
       const c = container();
       return !!c && t instanceof Node && c.contains(t);
     };
-    const inPopover = (t: EventTarget | null) => t instanceof Element && !!t.closest('.hl-popover');
-    const placing = () => useAnnotations.getState().tool === 'note';
+    // Popovers and text boxes handle their own mouse input.
+    const inPopover = (t: EventTarget | null) =>
+      t instanceof Element && !!t.closest('.hl-popover, .text-box, .sig-box');
+    const placing = () => useAnnotations.getState().tool !== 'select';
 
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0 || !inContainer(e.target) || inPopover(e.target)) return;
@@ -96,8 +108,19 @@ export function SelectionToolbar() {
 
       if (placing()) {
         const store = useAnnotations.getState();
-        if (moved < 5) placeNoteAt(e.clientX, e.clientY);
-        store.setTool('select'); // one note per activation
+        if (store.tool === 'text') {
+          if (start) placeTextBoxAt(start.x, start.y, e.clientX, e.clientY);
+        } else if (store.tool === 'sign') {
+          // Press and release both count: the signature lands where the button came up.
+          placeSignatureAt(e.clientX, e.clientY);
+        } else if (store.tool === 'edit') {
+          // Edit text stays on, so several lines can be changed one after another.
+          if (moved < 5) void startReplacementAt(e.clientX, e.clientY);
+        } else if (moved < 5) {
+          placeNoteAt(e.clientX, e.clientY);
+        }
+        // One note, text box or signature per activation; editing text stays on until turned off.
+        if (store.tool !== 'edit') store.setTool('select');
         swallowClick = true;
         setTimeout(() => (swallowClick = false), 400);
         return;

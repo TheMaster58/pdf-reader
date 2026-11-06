@@ -14,6 +14,8 @@ import {
 import type { ViewerController } from './controller';
 import { emptyFind, useApp, type AnnotationBlock } from './store';
 import { PasswordCancelledError, loadPdf } from './pdfjs';
+import type { ViewMode } from './viewMode';
+import { saveViewMode } from './viewPrefs';
 
 let controller: ViewerController | null = null;
 let openToken = 0;
@@ -25,6 +27,14 @@ export function registerController(c: ViewerController | null): void {
 
 export function getController(): ViewerController | null {
   return controller;
+}
+
+/** Changes the page layout, remembers it for next time, and applies it to the open document. */
+export function changeViewMode(mode: ViewMode): void {
+  useApp.setState({ viewMode: mode });
+  saveViewMode(mode);
+  controller?.setViewMode(mode);
+  controller?.focus();
 }
 
 function messageOf(err: unknown): string {
@@ -94,6 +104,9 @@ export async function openPath(path: string): Promise<void> {
       filePath: path,
       fileName: name,
       annotationBlock: block,
+      documentSigned: extracted?.signed ?? false,
+      signedAcknowledged: false,
+      signatureFields: extracted?.signatureFields ?? [],
       recent,
       find: emptyFind,
       findOpen: false,

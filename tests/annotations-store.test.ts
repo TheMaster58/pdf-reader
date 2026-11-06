@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { applyCommand, invertCommand, removeCommand } from '../src/annotations/history';
-import { createHighlight, type Annotation } from '../src/annotations/model';
+import {
+  createHighlight,
+  type Annotation,
+  type HighlightAnnotation,
+} from '../src/annotations/model';
 import { useAnnotations } from '../src/annotations/store';
 
 const make = (pageIndex = 0, color = '#FFE74C'): Annotation =>
@@ -62,15 +66,15 @@ describe('annotation store', () => {
     const a = make(0, '#FFE74C');
     state().addAnnotations([a]);
     state().updateAnnotation(a.id, { color: '#8CC8FF' });
-    expect(state().annotations[0].color).toBe('#8CC8FF');
+    expect((state().annotations[0] as HighlightAnnotation).color).toBe('#8CC8FF');
     expect(state().annotations[0].modified >= a.modified).toBe(true);
 
     state().undo();
-    expect(state().annotations[0].color).toBe('#FFE74C');
+    expect((state().annotations[0] as HighlightAnnotation).color).toBe('#FFE74C');
     expect(state().annotations[0].modified).toBe(a.modified);
 
     state().redo();
-    expect(state().annotations[0].color).toBe('#8CC8FF');
+    expect((state().annotations[0] as HighlightAnnotation).color).toBe('#8CC8FF');
   });
 
   it('delete + undo brings the highlight back in the same position', () => {

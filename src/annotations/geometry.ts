@@ -12,6 +12,8 @@ export interface Rect {
 export interface ViewportLike {
   width: number;
   height: number;
+  /** The page's rotation in degrees (PDF.js includes the page's own /Rotate). */
+  rotation?: number;
   convertToPdfPoint(x: number, y: number): number[];
   convertToViewportPoint(x: number, y: number): number[];
 }

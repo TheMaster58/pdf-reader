@@ -1,0 +1,9 @@
+node_modules
+dist
+src-tauri/target
+src-tauri/gen/schemas
+*.log
+.DS_Store
+public/pdfjs
+src-tauri/resources
+src-tauri/thumbnail/target

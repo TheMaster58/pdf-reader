@@ -1,0 +1,744 @@
+:root {
+  color-scheme: light dark;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+
+  --bg: #f3f3f3;
+  --surface: #ffffff;
+  --viewer-bg: #e6e6e6;
+  --text: #1b1b1b;
+  --muted: #6b6b6b;
+  --border: #d0d0d0;
+  --accent: #c82828;
+  --accent-text: #ffffff;
+  --hover: #e8e8e8;
+  --error-bg: #fde8e8;
+  --error-text: #7a1212;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #202020;
+    --surface: #2b2b2b;
+    --viewer-bg: #141414;
+    --text: #f0f0f0;
+    --muted: #a0a0a0;
+    --border: #3d3d3d;
+    --hover: #383838;
+    --error-bg: #4a1d1d;
+    --error-text: #ffd5d5;
+  }
+}
+
+/*
+ * border-box for our own UI only. PDF.js lays its pages out assuming the default content-box (a
+ * .page has a 9px border): under border-box the text layer ends up larger than the canvas and every
+ * span, selection and highlight drifts away from the real glyphs in proportion to its distance from
+ * the top-left corner.
+ */
+.app :not(.pdf-container, .pdf-container *),
+.hl-popover,
+.hl-popover * {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button,
+select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled),
+select:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+button:disabled,
+select:disabled,
+input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+button[aria-pressed='true'] {
+  background: var(--hover);
+  border-color: var(--muted);
+}
+
+input[type='text'],
+input[type='password'] {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- layout ---- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: var(--border);
+}
+
+.toolbar-title {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.page-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-nav input {
+  width: 3.5em;
+  text-align: center;
+}
+
+.page-total {
+  color: var(--muted);
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.viewer-host {
+  position: absolute;
+  inset: 0;
+}
+
+/* PDF.js requires its scroll container to be absolutely positioned. */
+.pdf-container {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--viewer-bg);
+  outline: none;
+}
+
+/* ---- recent menu ---- */
+
+.menu {
+  position: relative;
+}
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+.menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 21;
+  min-width: 320px;
+  max-width: 560px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+}
+
+.menu-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+}
+
+.menu-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/* ---- find bar ---- */
+
+.findbar {
+  position: absolute;
+  top: 10px;
+  right: 24px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+}
+
+.findbar input {
+  width: 220px;
+}
+
+.find-status {
+  min-width: 5.5em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.find-status.not-found {
+  color: var(--accent);
+}
+
+/* ---- empty state, banners, overlays ---- */
+
+.empty-state {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--bg);
+  text-align: center;
+}
+
+.empty-state h1 {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.empty-state .hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+.empty-state section {
+  margin-top: 20px;
+  min-width: 280px;
+  max-width: 480px;
+  text-align: left;
+}
+
+.empty-state h2 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.empty-state ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.empty-state li button {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: none;
+  background: transparent;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.banner.error {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.loading-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 15;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: loading 1s linear infinite;
+}
+
+@keyframes loading {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 8px;
+  z-index: 30;
+  display: grid;
+  place-content: center;
+  border: 3px dashed var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  font-size: 18px;
+  pointer-events: none;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-content: center;
+  background: rgb(0 0 0 / 0.45);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 360px;
+  padding: 18px;
+  background: var(--surface);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.4);
+}
+
+.modal h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.modal p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- highlights ---- */
+
+/* UI layer: fills the same box as the page's text layer and never intercepts the mouse. */
+.hl-host {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/*
+ * Colour layer. Like a real highlighter, the page shows through and dark text stays dark. It must be
+ * a direct child of the page with no z-index: otherwise it can't blend with the canvas beneath it.
+ */
+.hl-blend {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.hl-rect {
+  position: absolute;
+  border-radius: 2px;
+}
+
+.hl-rect.selected {
+  outline: 2px solid #1a73e8;
+  outline-offset: 0;
+}
+
+.hl-popover,
+.selection-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
+}
+
+.hl-popover {
+  position: absolute;
+  pointer-events: auto;
+  width: max-content;
+}
+
+.selection-toolbar {
+  position: fixed;
+  z-index: 40;
+  height: 44px;
+  transform: translateX(-50%);
+}
+
+.swatches {
+  display: flex;
+  gap: 6px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25);
+}
+
+.swatch:hover:not(:disabled) {
+  transform: scale(1.12);
+}
+
+.swatch.current {
+  border-color: var(--text);
+}
+
+button.danger {
+  color: var(--accent);
+}
+
+/* ---- notes ---- */
+
+.hl-popover {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.popover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.note-field {
+  width: 100%;
+  resize: vertical;
+  min-height: 3.6em;
+  max-height: 14em;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.note-icon,
+.note-marker {
+  position: absolute;
+  pointer-events: none;
+  line-height: 0;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.35));
+}
+
+.note-icon.selected {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* Placing a sticky note: crosshair everywhere, no text selection. */
+.pdf-container.note-tool,
+.pdf-container.note-tool * {
+  cursor: crosshair !important;
+  user-select: none !important;
+}
+
+.toolbar-note-btn {
+  white-space: nowrap;
+}
+
+/* ---- annotations sidebar ---- */
+
+.sidebar {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 300px;
+  min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.sidebar-count {
+  color: var(--muted);
+}
+
+.sidebar-close {
+  margin-left: auto;
+}
+
+.sidebar-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.sidebar-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.sidebar-list h3 {
+  margin: 12px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.sidebar-list ul {
+  margin: 0;
+  padding: 0 6px;
+  list-style: none;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.sidebar-item.selected {
+  background: var(--hover);
+  border-color: #1a73e8;
+}
+
+.chip-bar {
+  flex: none;
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+}
+
+.chip-bubble {
+  flex: none;
+  margin-top: 1px;
+}
+
+.item-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.item-text,
+.item-note {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow-wrap: anywhere;
+}
+
+.item-note {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.item-note.plain {
+  color: var(--text);
+  font-style: normal;
+}
+
+.item-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+kbd {
+  padding: 0 5px;
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/* ---- save, settings, notices ---- */
+
+.banner.info {
+  background: var(--hover);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 60;
+  padding: 8px 18px;
+  color: var(--accent-text);
+  background: #2e7d32;
+  border-radius: 20px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- about ---- */
+
+.about h2 {
+  font-size: 20px;
+}
+
+.about h3 {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.about-version {
+  color: var(--text);
+}
+
+.credits {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.credits li {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+
+.about-link {
+  margin-right: auto;
+  background: transparent;
+  border-color: transparent;
+  text-decoration: underline;
+}

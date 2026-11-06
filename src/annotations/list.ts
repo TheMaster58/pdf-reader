@@ -2,11 +2,13 @@ import type { Annotation } from './model';
 
 /** Highest PDF y of an annotation (its visual top on an unrotated page). */
 function topY(a: Annotation): number {
-  return a.kind === 'highlight' ? Math.max(...a.rects.map((r) => r[3])) : a.point[1];
+  if (a.kind === 'highlight') return Math.max(...a.rects.map((r) => r[3]));
+  return a.kind === 'note' ? a.point[1] : a.rect[3]; // text boxes and signatures have a rect
 }
 
 function leftX(a: Annotation): number {
-  return a.kind === 'highlight' ? Math.min(...a.rects.map((r) => r[0])) : a.point[0];
+  if (a.kind === 'highlight') return Math.min(...a.rects.map((r) => r[0]));
+  return a.kind === 'note' ? a.point[0] : a.rect[0];
 }
 
 /** Reading order for the sidebar: by page, then top to bottom, then left to right. */
@@ -37,6 +39,7 @@ export function anchorPoint(a: Annotation): [number, number] {
   return [leftX(a), topY(a)];
 }
 
+/** Does it carry a written comment? (A signature has none.) */
 export function hasNote(a: Annotation): boolean {
-  return a.contents.trim().length > 0;
+  return a.kind !== 'signature' && a.contents.trim().length > 0;
 }

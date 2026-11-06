@@ -1,12 +1,26 @@
 import { create } from 'zustand';
 import { applyCommand, invertCommand, removeCommand, type Command } from './history';
-import { DEFAULT_HIGHLIGHT_COLOR, type Annotation } from './model';
+import {
+  DEFAULT_HIGHLIGHT_COLOR,
+  DEFAULT_TEXT_STYLE,
+  isPointlessTextBox,
+  type Annotation,
+  type SignatureArtwork,
+  type SignatureVariant,
+  type TextStyle,
+} from './model';
 
 const MAX_HISTORY = 200;
 /** Edits to the same field of the same annotation within this window share one undo step. */
 const COALESCE_MS = 1500;
 
-export type Tool = 'select' | 'note';
+export type Tool = 'select' | 'note' | 'text' | 'sign' | 'edit';
+
+/** The signature or initials waiting to be placed with the next click on a page. */
+export interface PendingSignature {
+  variant: SignatureVariant;
+  artwork: SignatureArtwork;
+}
 
 export interface AnnotationState {
   annotations: Annotation[];
@@ -17,19 +31,36 @@ export interface AnnotationState {
   dirty: boolean;
   /** Colour used by the next highlight or note (the last one the user picked). */
   activeColor: string;
-  /** What a click on a page does: normal selection, or place a sticky note. */
+  /** What a click on a page does: normal selection, place a sticky note, or draw a text box. */
   tool: Tool;
+  /** With the sign tool: what the next click places. */
+  signing: PendingSignature | null;
+  /** The look the next text box gets: whatever the user last chose. */
+  textStyle: TextStyle;
+  /** The text box whose text is being typed into, if any. */
+  editingId: string | null;
   sidebarOpen: boolean;
   /** When set, the popover for this annotation focuses its note field as soon as it appears. */
   focusNoteId: string | null;
 
   addAnnotations: (anns: Annotation[]) => void;
   removeAnnotations: (ids: string[]) => void;
+  /**
+   * Takes back an annotation that was only just added and then abandoned (an empty text box): if
+   * nothing has happened since it was added, the add disappears from the undo history and the
+   * document is as clean as before. Otherwise it is an ordinary removal.
+   */
+  discardAnnotation: (id: string) => void;
   /** `coalesce: true` merges rapid successive edits (typing) into a single undo step. */
   updateAnnotation: (id: string, patch: Partial<Annotation>, opts?: { coalesce?: boolean }) => void;
   select: (id: string | null) => void;
   setActiveColor: (color: string) => void;
   setTool: (tool: Tool) => void;
+  /** Picks up a signature: the next click on a page places it. */
+  startSigning: (pending: PendingSignature) => void;
+  setTextStyle: (patch: Partial<TextStyle>) => void;
+  /** Starts (or, with null, ends) typing into a text box; also selects it. */
+  setEditing: (id: string | null) => void;
   setSidebarOpen: (open: boolean) => void;
   requestNoteFocus: (id: string | null) => void;
   undo: () => void;
@@ -51,15 +82,27 @@ const initial = {
   redoStack: [] as Command[],
   dirty: false,
   tool: 'select' as Tool,
+  signing: null as PendingSignature | null,
   focusNoteId: null as string | null,
+  editingId: null as string | null,
 };
 
 /** Time of the last coalescable edit; lives outside the store because it is not UI state. */
 let lastCoalescedAt = 0;
 
+/** The last single annotation added, and whether the document was dirty before that (for discard). */
+let lastAdd: { id: string; dirtyBefore: boolean } | null = null;
+
 export const useAnnotations = create<AnnotationState>((set, get) => {
   const keepSelection = (annotations: Annotation[], selectedId: string | null) =>
     annotations.some((a) => a.id === selectedId) ? selectedId : null;
+
+  /** Drops the text box `previous` if it is no longer the selection and is not worth keeping. */
+  const dropIfPointless = (previous: string | null, now: string | null) => {
+    if (!previous || previous === now) return;
+    const left = get().annotations.find((a) => a.id === previous);
+    if (left && isPointlessTextBox(left)) get().discardAnnotation(previous);
+  };
 
   /** Applies a new user action: records it for undo and clears the redo branch. */
   const perform = (cmd: Command) =>
@@ -77,15 +120,39 @@ export const useAnnotations = create<AnnotationState>((set, get) => {
   return {
     ...initial,
     activeColor: DEFAULT_HIGHLIGHT_COLOR,
+    textStyle: { ...DEFAULT_TEXT_STYLE },
     sidebarOpen: false,
 
     addAnnotations: (anns) => {
-      if (anns.length) perform({ kind: 'add', anns });
+      if (!anns.length) return;
+      const dirtyBefore = get().dirty;
+      perform({ kind: 'add', anns });
+      lastAdd = anns.length === 1 ? { id: anns[0].id, dirtyBefore } : null;
     },
 
     removeAnnotations: (ids) => {
       const cmd = removeCommand(get().annotations, ids);
       if (cmd) perform(cmd);
+    },
+
+    discardAnnotation: (id) => {
+      const s = get();
+      const top = s.undoStack[s.undoStack.length - 1];
+      // Only while that add is still the newest thing in the history: anything later invalidates it.
+      if (lastAdd?.id === id && top?.kind === 'add' && top.anns.length === 1 && top.anns[0].id === id) {
+        const { dirtyBefore } = lastAdd;
+        lastAdd = null;
+        const annotations = s.annotations.filter((a) => a.id !== id);
+        set({
+          annotations,
+          undoStack: s.undoStack.slice(0, -1),
+          dirty: dirtyBefore,
+          selectedId: keepSelection(annotations, s.selectedId),
+          editingId: null,
+        });
+      } else {
+        get().removeAnnotations([id]);
+      }
     },
 
     updateAnnotation: (id, patch, opts) => {
@@ -127,11 +194,28 @@ export const useAnnotations = create<AnnotationState>((set, get) => {
       });
     },
 
-    select: (id) => set({ selectedId: id }),
+    // Selecting something else ends text editing, and a text box left behind with nothing worth
+    // keeping (empty, or an edit that changed nothing) is dropped: it would otherwise be saved.
+    select: (id) => {
+      const previous = get().selectedId;
+      set((s) => ({ selectedId: id, editingId: s.editingId === id ? id : null }));
+      dropIfPointless(previous, id);
+    },
 
     setActiveColor: (color) => set({ activeColor: color }),
 
-    setTool: (tool) => set({ tool }),
+    // Leaving the sign tool drops the signature being carried.
+    setTool: (tool) => set((s) => ({ tool, signing: tool === 'sign' ? s.signing : null })),
+
+    startSigning: (signing) => set({ tool: 'sign', signing, selectedId: null, editingId: null }),
+
+    setTextStyle: (patch) => set((s) => ({ textStyle: { ...s.textStyle, ...patch } })),
+
+    setEditing: (editingId) => {
+      const previous = get().selectedId;
+      set(editingId ? { editingId, selectedId: editingId } : { editingId: null });
+      if (editingId) dropIfPointless(previous, editingId);
+    },
 
     setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 
@@ -167,10 +251,14 @@ export const useAnnotations = create<AnnotationState>((set, get) => {
 
     loadAnnotations: (anns) => {
       lastCoalescedAt = 0;
+      lastAdd = null;
       set({ ...initial, annotations: anns });
     },
 
-    markSaved: (snapshot) => set((s) => (s.annotations === snapshot ? { dirty: false } : s)),
+    markSaved: (snapshot) => {
+      lastAdd = null; // a saved document no longer goes back to "unchanged" by dropping the add
+      set((s) => (s.annotations === snapshot ? { dirty: false } : s));
+    },
 
     setHighlightText: (id, text) =>
       set((s) => ({
@@ -179,6 +267,7 @@ export const useAnnotations = create<AnnotationState>((set, get) => {
 
     reset: () => {
       lastCoalescedAt = 0;
+      lastAdd = null;
       set({ ...initial });
     },
   };

@@ -113,13 +113,13 @@ describe('typing a note (coalesced undo)', () => {
       vi.advanceTimersByTime(100);
       type(n.id, text);
     }
-    expect(state().annotations[0].contents).toBe('hello');
+    expect((state().annotations[0] as HighlightAnnotation).contents).toBe('hello');
     expect(state().undoStack).toHaveLength(2); // the add, and one merged edit
 
     state().undo();
-    expect(state().annotations[0].contents).toBe('');
+    expect((state().annotations[0] as HighlightAnnotation).contents).toBe('');
     state().redo();
-    expect(state().annotations[0].contents).toBe('hello');
+    expect((state().annotations[0] as HighlightAnnotation).contents).toBe('hello');
   });
 
   it('starts a new undo step after a pause', () => {
@@ -130,7 +130,7 @@ describe('typing a note (coalesced undo)', () => {
     type(n.id, 'first second');
     expect(state().undoStack).toHaveLength(3);
     state().undo();
-    expect(state().annotations[0].contents).toBe('first');
+    expect((state().annotations[0] as HighlightAnnotation).contents).toBe('first');
   });
 
   it('does not merge edits to different annotations or different fields', () => {
@@ -190,5 +190,6 @@ describe('UI state in the store', () => {
 });
 
 // Type-level check that the union is usable generically.
-const _exhaustive = (a: Annotation): string => (a.kind === 'highlight' ? a.text : a.contents);
+const _exhaustive = (a: Annotation): string =>
+  a.kind === 'highlight' ? a.text : a.kind === 'note' || a.kind === 'textbox' ? a.contents : '';
 void _exhaustive;

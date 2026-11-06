@@ -1,3 +1,6 @@
+import { fieldAt, fieldFrames, fitInto, frameAround } from '../signature/placement';
+import { heightForLines, minBoxWidth } from '../text/textLayout';
+import { rectAt, rectFromPoints } from './boxGeometry';
 import {
   clientToFraction,
   fractionToPdf,
@@ -15,8 +18,14 @@ import {
   NOTE_MARKER,
   createHighlight,
   createNote,
+  SIGNATURE_DEFAULT_WIDTH,
+  artworkAspect,
+  createSignature,
+  createTextBox,
   type HighlightAnnotation,
   type NoteAnnotation,
+  type SignatureAnnotation,
+  type TextBoxAnnotation,
 } from './model';
 import { usePageHosts } from './pageHosts';
 import { useApp } from '../viewer/store';
@@ -168,7 +177,131 @@ export function placeNoteAt(clientX: number, clientY: number): NoteAnnotation | 
   return null;
 }
 
-/** Id of the topmost highlight or sticky note under the given client point, or null. */
+/** Width of a text box made by a plain click, in PDF points. */
+export const DEFAULT_TEXT_BOX_WIDTH = 180;
+/** A drag shorter than this (client pixels) in either direction counts as a click. */
+const MIN_DRAG_PX = 12;
+
+/**
+ * Creates a text box from a press-and-release with the text tool: a click makes a one-line box with
+ * its top-left at the click, a drag makes a box of that size. Returns null if the press wasn't over
+ * a rendered page. The box is added, selected and opened for typing.
+ */
+export function placeTextBoxAt(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): TextBoxAnnotation | null {
+  const { hosts } = usePageHosts.getState();
+  for (const [index, host] of Object.entries(hosts)) {
+    const origin = host.el.getBoundingClientRect();
+    if (origin.width === 0 || origin.height === 0) continue;
+    if (startX < origin.left || startX > origin.right || startY < origin.top || startY > origin.bottom) {
+      continue;
+    }
+    const vp = host.viewport;
+    const store = useAnnotations.getState();
+    const style = store.textStyle;
+    const at = (x: number, y: number) => ({ x: (x - origin.left) / origin.width, y: (y - origin.top) / origin.height });
+    const a = at(startX, startY);
+    const b = at(endX, endY);
+
+    const minWidth = minBoxWidth(style.fontSize) / vp.width;
+    const oneLine = heightForLines(style.fontSize, 1) / vp.height;
+    const dragged = Math.abs(endX - startX) >= MIN_DRAG_PX && Math.abs(endY - startY) >= MIN_DRAG_PX;
+    let frame: Rect;
+    if (dragged) {
+      const r = rectFromPoints(a, b);
+      frame = rectAt(r.left, r.top, Math.max(r.right - r.left, minWidth), Math.max(r.bottom - r.top, oneLine));
+    } else {
+      frame = rectAt(a.x, a.y, DEFAULT_TEXT_BOX_WIDTH / vp.width, oneLine);
+    }
+
+    const rect = fractionToPdf(vp, frame);
+    const box = createTextBox({
+      pageIndex: Number(index),
+      rect,
+      style,
+      author: useApp.getState().author,
+    });
+    store.addAnnotations([box]);
+    store.setEditing(box.id);
+    return box;
+  }
+  return null;
+}
+
+/** Where a pending signature would go if the pointer were pressed at a client point. */
+export interface SignaturePlacement {
+  pageIndex: number;
+  /** The page's overlay box on screen, to turn the frame into screen pixels. */
+  origin: DOMRect;
+  /** The frame as page fractions. */
+  frame: Rect;
+  /** True when it snapped into an empty signature field. */
+  inField: boolean;
+  /** The field it snapped into, as page fractions. */
+  field: Rect | null;
+}
+
+/**
+ * Works out where the signature being carried would land at a client point: fitted inside an empty
+ * signature field if the point is over one, otherwise at its default size centred on the point.
+ * Null if the point is not over a rendered page or nothing is being carried.
+ */
+export function signaturePlacementAt(clientX: number, clientY: number): SignaturePlacement | null {
+  const pending = useAnnotations.getState().signing;
+  if (!pending) return null;
+  const aspect = artworkAspect(pending.artwork);
+  const { signatureFields } = useApp.getState();
+  for (const [index, host] of Object.entries(usePageHosts.getState().hosts)) {
+    const origin = host.el.getBoundingClientRect();
+    if (origin.width === 0 || origin.height === 0) continue;
+    if (clientX < origin.left || clientX > origin.right || clientY < origin.top || clientY > origin.bottom) {
+      continue;
+    }
+    const pageIndex = Number(index);
+    const vp = host.viewport;
+    const at = { x: (clientX - origin.left) / origin.width, y: (clientY - origin.top) / origin.height };
+    const fields = fieldFrames(
+      vp,
+      signatureFields.filter((f) => f.pageIndex === pageIndex).map((f) => f.rect),
+    );
+    const hit = fieldAt(fields, at);
+    const frame =
+      hit >= 0
+        ? fitInto(fields[hit], vp, aspect)
+        : frameAround(vp, at, SIGNATURE_DEFAULT_WIDTH[pending.variant], aspect);
+    return { pageIndex, origin, frame, inField: hit >= 0, field: hit >= 0 ? fields[hit] : null };
+  }
+  return null;
+}
+
+/**
+ * Puts the signature being carried on the page at a client point (see signaturePlacementAt). The
+ * new signature is selected and the sign tool ends. Returns null if the point is not over a page.
+ */
+export function placeSignatureAt(clientX: number, clientY: number): SignatureAnnotation | null {
+  const store = useAnnotations.getState();
+  const pending = store.signing;
+  const placement = signaturePlacementAt(clientX, clientY);
+  const host = placement && usePageHosts.getState().hosts[placement.pageIndex];
+  if (!pending || !placement || !host) return null;
+  const signature = createSignature({
+    pageIndex: placement.pageIndex,
+    rect: fractionToPdf(host.viewport, placement.frame),
+    variant: pending.variant,
+    artwork: pending.artwork,
+    author: useApp.getState().author,
+  });
+  store.addAnnotations([signature]);
+  store.setTool('select');
+  store.select(signature.id);
+  return signature;
+}
+
+/** Id of the topmost highlight, sticky note or text box under the given client point, or null. */
 export function hitTestAnnotation(clientX: number, clientY: number): string | null {
   const hosts = usePageHosts.getState().hosts;
   const { annotations } = useAnnotations.getState();
@@ -180,6 +313,14 @@ export function hitTestAnnotation(clientX: number, clientY: number): string | nu
     if (box.width === 0 || box.height === 0) continue;
     const px = clientX - box.left;
     const py = clientY - box.top;
+
+    if (ann.kind === 'textbox' || ann.kind === 'signature') {
+      const f = pdfToFraction(host.viewport, ann.rect);
+      if (px >= f.left * box.width && px <= f.right * box.width && py >= f.top * box.height && py <= f.bottom * box.height) {
+        return ann.id;
+      }
+      continue;
+    }
 
     if (ann.kind === 'note') {
       // The icon has a fixed pixel size, so compare in pixels.

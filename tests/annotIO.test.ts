@@ -13,6 +13,10 @@ import {
 import { UnsupportedPdfError, extractAnnotations, writeAnnotations } from '../src/pdf/annotIO';
 import { acrobatStylePdf } from './helpers/foreignPdf';
 
+/** Highlights and notes: the kinds that carry a colour and a comment. */
+type Commented = HighlightAnnotation | NoteAnnotation;
+const commented = (list: Annotation[]) => list as Commented[];
+
 const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, 'fixtures', name)));
 
 async function blankPdf(pages = 3): Promise<Uint8Array> {
@@ -149,9 +153,9 @@ describe('writeAnnotations: what other readers see (PDF.js)', () => {
 
 describe('round trip through extractAnnotations', () => {
   it('returns the same annotations that were written', async () => {
-    const written: Annotation[] = [sampleHighlight(), sampleNote(), sampleHighlight({ pageIndex: 2, contents: '' })];
+    const written: Commented[] = [sampleHighlight(), sampleNote(), sampleHighlight({ pageIndex: 2, contents: '' })];
     const saved = await writeAnnotations(await blankPdf(), written);
-    const { annotations } = await extractAnnotations(saved);
+    const annotations = commented((await extractAnnotations(saved)).annotations);
 
     expect(annotations).toHaveLength(3);
     for (const w of written) {
@@ -176,7 +180,7 @@ describe('round trip through extractAnnotations', () => {
   it('preserves non-ASCII text in comments and author', async () => {
     const text = 'Zażółć gęślą jaźń 日本語 😀';
     const saved = await writeAnnotations(await blankPdf(), [sampleHighlight({ contents: text, author: 'Łukasz' })]);
-    const [a] = (await extractAnnotations(saved)).annotations;
+    const [a] = commented((await extractAnnotations(saved)).annotations);
     expect(a.contents).toBe(text);
     expect(a.author).toBe('Łukasz');
     expect((await pdfjsAnnotations(saved, 1)).find((x) => x.subtype === 'Highlight')!.contentsObj.str).toBe(text);
@@ -263,7 +267,7 @@ describe('privacy: removed annotations are really gone', () => {
 
 describe('annotations made by other tools', () => {
   it('reads them with the right colours, geometry and metadata', async () => {
-    const { annotations } = await extractAnnotations(await acrobatStylePdf());
+    const annotations = commented((await extractAnnotations(await acrobatStylePdf())).annotations);
     const byContent = (c: string) => annotations.find((a) => a.contents === c);
 
     const h1 = byContent('acrobat comment') as HighlightAnnotation;
@@ -286,7 +290,8 @@ describe('annotations made by other tools', () => {
   });
 
   it('leaves replies, underlines, links and unreadable highlights alone', async () => {
-    const { annotations, viewBytes } = await extractAnnotations(await acrobatStylePdf());
+    const { annotations: all, viewBytes } = await extractAnnotations(await acrobatStylePdf());
+    const annotations = commented(all);
     const taken = annotations.map((a) => a.contents);
     expect(taken).not.toContain('a reply');
     expect(taken).not.toContain('unreadable');
@@ -349,7 +354,7 @@ describe('annotations made by other tools', () => {
     const saved = await writeAnnotations(original, edited);
     const back = (await extractAnnotations(saved)).annotations;
     expect(back).toHaveLength(annotations.length - 1);
-    expect(back.map((a) => a.contents)).toContain('edited!');
+    expect(commented(back).map((a) => a.contents)).toContain('edited!');
     expect(await allContentsStrings(saved)).not.toContain('acrobat comment');
   });
 });

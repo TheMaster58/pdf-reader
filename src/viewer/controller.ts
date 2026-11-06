@@ -5,12 +5,16 @@ import {
   PDFFindController,
   PDFLinkService,
   PDFViewer,
+  ScrollMode,
+  SpreadMode,
 } from 'pdfjs-dist/web/pdf_viewer.mjs';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import type { PDFDocumentProxy } from './pdfjs';
 import { emptyFind, useApp } from './store';
 import { openExternal } from '../services/files';
 import { usePageHosts } from '../annotations/pageHosts';
+import { WheelFlipper, flipForKey, type Edges, type Flip } from './pageNav';
+import { isPaged, viewerSettings, type ViewMode } from './viewMode';
 
 export const ZOOM_PRESETS = ['auto', 'page-fit', 'page-width'] as const;
 export const ZOOM_PERCENTS = [50, 75, 100, 125, 150, 200, 300, 400];
@@ -43,6 +47,7 @@ export class ViewerController {
   /** Overlay element per page index. PDF.js strips unknown children on re-render, so we re-attach. */
   private readonly hostEls = new Map<number, { ui: HTMLElement; blend: HTMLElement }>();
   private readonly hostObservers = new Map<number, MutationObserver>();
+  private readonly wheelFlipper = new WheelFlipper();
 
   constructor(
     private readonly container: HTMLDivElement,
@@ -66,6 +71,9 @@ export class ViewerController {
     this.linkService.setViewer(this.viewer);
 
     this.eventBus.on('pagesinit', () => {
+      // PDF.js forgets the page layout whenever a document is set, so apply the user's choice (kept
+      // between documents) before the zoom: fit-page and fit-width depend on it.
+      this.applyViewMode(useApp.getState().viewMode);
       // Apply the zoom the user last chose (kept between documents).
       this.viewer.currentScaleValue = useApp.getState().scaleValue;
       useApp.setState({
@@ -119,15 +127,50 @@ export class ViewerController {
       resizeObserver.disconnect();
     });
 
-    // Ctrl+wheel zooms. Must be non-passive so we can stop the webview's own page zoom.
+    // Ctrl+wheel zooms. Must be non-passive so we can stop the webview's own page zoom. In the
+    // one-page-at-a-time layouts, scrolling past the end of a page turns to the next one.
     container.addEventListener(
       'wheel',
       (e) => {
-        if (!e.ctrlKey) return;
-        e.preventDefault();
-        this.zoomBy(e.deltaY < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP);
+        if (e.ctrlKey) {
+          e.preventDefault();
+          this.zoomBy(e.deltaY < 0 ? WHEEL_ZOOM_STEP : 1 / WHEEL_ZOOM_STEP);
+          return;
+        }
+        if (!this.doc || !isPaged(useApp.getState().viewMode.layout)) return;
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // sideways panning
+        const lines = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+        const flip = this.wheelFlipper.handle(e.deltaY * lines, this.edges(), e.timeStamp);
+        if (flip) this.flip(flip);
+        // Also swallow the rest of the gesture, or its momentum would scroll the page we just turned to.
+        if (flip || this.wheelFlipper.isLocked) e.preventDefault();
       },
       { passive: false, signal: this.abort.signal },
+    );
+
+    // Page-turning keys in the one-page-at-a-time layouts (they scroll as usual until the end of the page).
+    container.addEventListener(
+      'keydown',
+      (e) => {
+        if (!this.doc || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (!isPaged(useApp.getState().viewMode.layout)) return;
+        const t = e.target;
+        // Typing in a note must not turn pages.
+        if (
+          t instanceof HTMLInputElement ||
+          t instanceof HTMLTextAreaElement ||
+          t instanceof HTMLSelectElement ||
+          (t instanceof HTMLElement && t.isContentEditable)
+        ) {
+          return;
+        }
+        const flip = flipForKey(e.key, e.shiftKey, this.edges());
+        if (flip) {
+          e.preventDefault();
+          this.flip(flip);
+        }
+      },
+      { signal: this.abort.signal },
     );
 
     // Open web links in the default browser.
@@ -206,6 +249,11 @@ export class ViewerController {
     return this.doc !== null;
   }
 
+  /** The open document. Callers must not destroy it. */
+  get pdfDocument(): PDFDocumentProxy | null {
+    return this.doc;
+  }
+
   /** Shows `doc`, replacing (and destroying) whatever was open before. */
   setDocument(doc: PDFDocumentProxy): void {
     this.closeDocument();
@@ -229,6 +277,55 @@ export class ViewerController {
   dispose(): void {
     this.abort.abort();
     this.closeDocument();
+  }
+
+  // ---- page layout ----
+
+  /** Sets how pages are laid out (one or two across, continuous or one at a time). */
+  setViewMode(mode: ViewMode): void {
+    if (this.doc) this.applyViewMode(mode);
+  }
+
+  private applyViewMode(mode: ViewMode): void {
+    const { scroll, spread } = viewerSettings(mode);
+    this.wheelFlipper.reset();
+    this.container.classList.toggle('paged-layout', isPaged(mode.layout));
+    this.viewer.spreadMode =
+      spread === 'none' ? SpreadMode.NONE : spread === 'odd' ? SpreadMode.ODD : SpreadMode.EVEN;
+    this.viewer.scrollMode = scroll === 'page' ? ScrollMode.PAGE : ScrollMode.VERTICAL;
+  }
+
+  /**
+   * Which edges of the scroll area the view is resting against (all of them when the page fits).
+   *
+   * Being within a few pixels of an end counts as being at it, because sizes are fractional at most
+   * zoom levels and a page that is meant to fit can still be a pixel or two over. Without the slack
+   * the keys and the wheel would first have to scroll that sliver before turning the page.
+   */
+  edges(): Edges {
+    const c = this.container;
+    const vertical = 8;
+    const horizontal = 4;
+    return {
+      top: c.scrollTop <= vertical,
+      bottom: c.scrollTop + c.clientHeight >= c.scrollHeight - vertical,
+      left: c.scrollLeft <= horizontal,
+      right: c.scrollLeft + c.clientWidth >= c.scrollWidth - horizontal,
+    };
+  }
+
+  private flip(direction: Flip): void {
+    if (direction === 'next') this.viewer.nextPage();
+    else this.viewer.previousPage();
+  }
+
+  /** The next page, or the next pair in a two-page layout. */
+  nextPage(): void {
+    if (this.doc) this.flip('next');
+  }
+
+  previousPage(): void {
+    if (this.doc) this.flip('prev');
   }
 
   // ---- navigation ----

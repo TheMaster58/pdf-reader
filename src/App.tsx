@@ -13,8 +13,18 @@ import {
 import { ensureCanLeave, saveCurrent } from './annotations/persist';
 import { HighlightLayers } from './annotations/PageOverlay';
 import { AnnotationsSidebar } from './annotations/AnnotationsSidebar';
+import { SignatureFieldHints, SignaturePreview } from './annotations/SignatureHints';
+import { SignatureDialog } from './signature/SignatureDialog';
+import { SignedDialog } from './viewer/SignedDialog';
 import { SelectionToolbar } from './annotations/SelectionToolbar';
 import { useAnnotations } from './annotations/store';
+import { onTextBoxKeyDown } from './annotations/textBoxKeys';
+import { toggleEditText } from './annotations/editMode';
+import { EditTextHints } from './annotations/EditHints';
+import { EditNoticeDialog } from './viewer/EditNoticeDialog';
+import { PrintDialog } from './print/PrintDialog';
+import { PrintRoot } from './print/PrintRoot';
+import { openPrintDialog } from './print/printDocument';
 import { FindBar } from './viewer/FindBar';
 import { PasswordDialog } from './viewer/PasswordDialog';
 import { PdfViewer } from './viewer/PdfViewer';
@@ -68,6 +78,10 @@ function useKeyboardShortcuts() {
       } else if (mod && key === 'o') {
         e.preventDefault();
         void openWithDialog();
+      } else if (mod && key === 'p') {
+        // Always claimed: the webview's own Ctrl+P would print the app window, not the document.
+        e.preventDefault();
+        if (hasDoc) openPrintDialog();
       } else if (mod && key === 'f') {
         e.preventDefault();
         if (hasDoc) {
@@ -94,7 +108,13 @@ function useKeyboardShortcuts() {
       } else if (!mod && !inField && hasDoc && !state.annotationBlock && key === 'n') {
         e.preventDefault();
         annotations.setTool(annotations.tool === 'note' ? 'select' : 'note');
-      } else if (!mod && !inField && annotations.tool === 'note' && e.key === 'Escape') {
+      } else if (!mod && !inField && hasDoc && !state.annotationBlock && key === 'e') {
+        e.preventDefault();
+        toggleEditText();
+      } else if (!mod && !inField && hasDoc && !state.annotationBlock && key === 't') {
+        e.preventDefault();
+        annotations.setTool(annotations.tool === 'text' ? 'select' : 'text');
+      } else if (!mod && !inField && annotations.tool !== 'select' && e.key === 'Escape') {
         annotations.setTool('select');
       } else if (!mod && !inField && annotations.selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault();
@@ -114,6 +134,14 @@ function useKeyboardShortcuts() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+}
+
+/** Keys for a selected text box (Enter to type, arrows to nudge). Capture phase: see onTextBoxKeyDown. */
+function useTextBoxKeys() {
+  useEffect(() => {
+    window.addEventListener('keydown', onTextBoxKeyDown, true);
+    return () => window.removeEventListener('keydown', onTextBoxKeyDown, true);
   }, []);
 }
 
@@ -198,9 +226,11 @@ export function App() {
   const loading = useApp((s) => s.status === 'loading');
 
   useKeyboardShortcuts();
+  useTextBoxKeys();
   useDocumentLifecycle();
   const block = useApp((s) => s.annotationBlock);
   const notice = useApp((s) => s.notice);
+  const noticeTone = useApp((s) => s.noticeTone);
 
   useTauriSubscription(() => onOpenFileRequest((path) => void openPath(path)));
   useTauriSubscription(() =>
@@ -244,6 +274,8 @@ export function App() {
         <main className="stage">
           <PdfViewer />
           <HighlightLayers />
+          <SignatureFieldHints />
+          <EditTextHints />
           <FindBar />
           <EmptyState />
           {loading && <div className="loading-bar" role="progressbar" aria-label="Loading" />}
@@ -256,11 +288,17 @@ export function App() {
       <UnsavedDialog />
       <SettingsDialog />
       <AboutDialog />
+      <PrintDialog />
+      <SignatureDialog />
+      <SignedDialog />
+      <EditNoticeDialog />
+      <SignaturePreview />
       {notice && (
-        <div className="toast" role="status">
+        <div className={'toast' + (noticeTone === 'info' ? ' info' : '')} role="status">
           {notice}
         </div>
       )}
+      <PrintRoot />
     </div>
   );
 }

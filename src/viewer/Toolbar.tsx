@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react';
 import { fileNameOf } from '../services/files';
 import { saveCurrent } from '../annotations/persist';
+import { openPrintDialog } from '../print/printDocument';
 import { getController, openPath, openWithDialog } from './actions';
 import { ZOOM_PERCENTS } from './controller';
 import { useAnnotations } from '../annotations/store';
 import { useApp } from './store';
+import { toggleEditText } from '../annotations/editMode';
+import { SignMenu } from '../signature/SignMenu';
+import { ViewMenu } from './ViewMenu';
+import { spreadPages } from './viewMode';
 
 const PRESET_LABELS: Record<string, string> = {
   auto: 'Automatic',
@@ -60,8 +65,23 @@ function PageInput() {
     setDraft(null);
   };
 
+  const viewMode = useApp((s) => s.viewMode);
+  // In a two-page layout one step moves by a pair, so "first" and "last" mean the pair's ends.
+  const [firstShown, lastShown] = spreadPages(pageNumber, pagesCount, viewMode);
+  const atStart = !pagesCount || firstShown <= 1;
+  const atEnd = !pagesCount || lastShown >= pagesCount;
+
   return (
     <span className="page-nav">
+      <button
+        type="button"
+        aria-label="Previous page"
+        title="Previous page"
+        disabled={atStart}
+        onClick={() => getController()?.previousPage()}
+      >
+        {'‹'}
+      </button>
       <input
         type="text"
         inputMode="numeric"
@@ -82,6 +102,15 @@ function PageInput() {
         }}
       />
       <span className="page-total">/ {pagesCount || '-'}</span>
+      <button
+        type="button"
+        aria-label="Next page"
+        title="Next page"
+        disabled={atEnd}
+        onClick={() => getController()?.nextPage()}
+      >
+        {'›'}
+      </button>
     </span>
   );
 }
@@ -134,6 +163,8 @@ export function Toolbar() {
   const findOpen = useApp((s) => s.findOpen);
   const fileName = useApp((s) => s.fileName);
   const noteTool = useAnnotations((s) => s.tool === 'note');
+  const textTool = useAnnotations((s) => s.tool === 'text');
+  const editTool = useAnnotations((s) => s.tool === 'edit');
   const sidebarOpen = useAnnotations((s) => s.sidebarOpen);
   const count = useAnnotations((s) => s.annotations.length);
   const dirty = useAnnotations((s) => s.dirty);
@@ -163,6 +194,14 @@ export function Toolbar() {
       >
         Save as...
       </button>
+      <button
+        type="button"
+        disabled={!hasDoc}
+        title="Print (Ctrl+P)"
+        onClick={() => openPrintDialog()}
+      >
+        Print
+      </button>
       <span className="toolbar-sep" />
       <PageInput />
       <span className="toolbar-sep" />
@@ -185,6 +224,7 @@ export function Toolbar() {
       >
         +
       </button>
+      <ViewMenu />
       <span className="toolbar-sep" />
       <button
         type="button"
@@ -212,6 +252,25 @@ export function Toolbar() {
       >
         Note
       </button>
+      <button
+        type="button"
+        aria-pressed={textTool}
+        disabled={!hasDoc || blocked}
+        title="Add a text box: click the page, or drag to size it (T)"
+        onClick={() => useAnnotations.getState().setTool(textTool ? 'select' : 'text')}
+      >
+        Text
+      </button>
+      <button
+        type="button"
+        aria-pressed={editTool}
+        disabled={!hasDoc || blocked}
+        title="Edit existing text: click a line of text and retype it (E)"
+        onClick={() => toggleEditText()}
+      >
+        Edit text
+      </button>
+      <SignMenu />
       <button
         type="button"
         aria-pressed={sidebarOpen}
